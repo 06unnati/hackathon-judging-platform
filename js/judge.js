@@ -1,139 +1,198 @@
-// Shared logic: schedule generation, scoring, and small helpers.
-// No Firebase imports here, so this file can also be tested in Node.
+import { db, doc, getDoc, setDoc, onSnapshot, errMsg, toast, configured } from "./firebase.js";
+import { esc, teamsFor, scoreId, normalizeCode, prettyCode, isValidScore } from "./common.js";
 
-export const range = n => [...Array(n).keys()];
+const $ = s => document.querySelector(s);
+const ls = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
 
-export function shuffle(a) {
-  for (let i = a.length - 1; i > 0; i--) {
-    const k = (Math.random() * (i + 1)) | 0;
-    [a[i], a[k]] = [a[k], a[i]];
-  }
-  return a;
+const S = {
+  code: null,        // this judge's access code
+  me: null,          // {judge, name, scheduleId}
+  cfg: null,         // config/main
+  scores: {},        // round -> score doc
+  viewRound: null,
+  picks: null,       // team indexes in ranked order
+  unsubs: [],
+};
+
+function show(which) {
+  $('#loading').hidden = true;
+  $('#gate').hidden = which !== 'gate';
+  $('#judge').hidden = which !== 'judge';
 }
 
-export const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function stopListening() { S.unsubs.forEach(u => u()); S.unsubs = []; }
 
-/* ---------- schedule generation ----------
-   n teams, j judges, x rounds, y teams per judge per round.
-   Each round: spread the j*y judging slots as evenly as possible over teams
-   (teams with fewer judgings so far get the extra slots), then hand them to
-   judges while avoiding judge-team pairs that already happened. */
+function signOutJudge(msg) {
+  stopListening();
+  ls.del('judgeCode');
+  Object.assign(S, { code: null, me: null, cfg: null, scores: {}, viewRound: null, picks: null });
+  $('#whoPill').hidden = true;
+  $('#roundPill').hidden = true;
+  $('#hdrName').textContent = 'Hackathon Judging';
+  $('#hdrSub').textContent = 'Judge portal';
+  $('#codeErr').textContent = msg || '';
+  show('gate');
+  $('#codeInput').focus();
+}
 
-function tryAssign(n, j, y, mult, pair) {
-  const cap = new Array(j).fill(y);
-  const lists = range(j).map(() => []);
-  let rep = 0;
-  const teams = shuffle(range(n)).filter(t => mult[t] > 0).sort((a, b) => mult[b] - mult[a]);
-  for (const t of teams) {
-    const cands = shuffle(range(j).filter(ji => cap[ji] > 0))
-      .sort((a, b) => (pair[a][t] - pair[b][t]) || (cap[b] - cap[a]));
-    if (cands.length < mult[t]) return null;
-    for (let i = 0; i < mult[t]; i++) {
-      const ji = cands[i];
-      lists[ji].push(t);
-      cap[ji]--;
-      if (pair[ji][t] > 0) rep++;
+async function signIn(code) {
+  const snap = await getDoc(doc(db, 'judgeCodes', code));
+  if (!snap.exists()) return false;
+  S.code = code;
+  S.me = snap.data();
+  ls.set('judgeCode', code);
+  listen();
+  return true;
+}
+
+function listen() {
+  stopListening();
+  S.unsubs.push(onSnapshot(doc(db, 'config', 'main'), snap => {
+    const cfg = snap.exists() ? snap.data() : null;
+    if (!cfg || cfg.scheduleId !== S.me.scheduleId) {
+      signOutJudge('That code is from an older schedule. Ask the organizer for your new code.');
+      return;
+    }
+    const first = !S.cfg;
+    S.cfg = cfg;
+    if (first) {
+      // one listener per round for this judge's own rankings
+      for (let r = 0; r < cfg.rounds; r++) {
+        S.unsubs.push(onSnapshot(doc(db, 'scores', scoreId(S.code, r)), s => {
+          S.scores[r] = s.exists() ? s.data() : null;
+          render();
+        }, () => {}));
+      }
+    }
+    render();
+  }, err => toast(errMsg(err))));
+}
+
+function render() {
+  const c = S.cfg;
+  if (!c) return;
+  show('judge');
+  $('#hdrName').textContent = c.event || 'Hackathon Judging';
+  $('#hdrSub').textContent = `Judge portal · ${c.teams.length} teams`;
+  const who = $('#whoPill');
+  who.hidden = false;
+  who.textContent = S.me.name;
+  const rp = $('#roundPill');
+  rp.hidden = false;
+  rp.textContent = `Round ${c.currentRound + 1} of ${c.rounds}`;
+
+  if (S.viewRound === null || S.viewRound > c.currentRound) { S.viewRound = c.currentRound; S.picks = null; }
+
+  $('#judgeRounds').innerHTML = Array.from({ length: c.rounds }, (_, r) => {
+    const done = isValidScore(c, S.scores[r]);
+    return `<button type="button" data-r="${r}" aria-pressed="${r === S.viewRound}" ${r > c.currentRound ? 'disabled title="Not started yet"' : ''}>${r + 1}${done ? ' ✓' : ''}</button>`;
+  }).join('');
+
+  const r = S.viewRound;
+  const teams = teamsFor(c, r, S.me.judge);
+  const existing = isValidScore(c, S.scores[r]) ? S.scores[r] : null;
+  if (S.picks === null) S.picks = existing ? existing.ranking.slice() : [];
+  const complete = S.picks.length === teams.length;
+  const same = existing && existing.ranking.join(',') === S.picks.join(',');
+
+  const status = existing ? 'Ranking submitted. You can change it and resubmit.'
+    : r < c.currentRound ? 'This round has passed. Submit if you still need to.'
+    : 'Tap teams from best to worst.';
+
+  let h = `<div class="card">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:baseline">
+      <h2>Round ${r + 1}: your ${teams.length} teams</h2>
+      <span class="muted" style="font-size:14px">${status}</span>
+    </div>
+    <p class="muted" style="margin:0;font-size:14px">The first team you tap is rank 1. Tap a ranked team to take it out.</p>
+    <div class="teams">`;
+  teams.forEach(t => {
+    const k = S.picks.indexOf(t);
+    h += `<button type="button" class="team${k >= 0 ? ' ranked' : ''}" data-t="${t}" aria-label="Team ${t + 1}${k >= 0 ? ', ranked ' + (k + 1) : ''}">
+      ${k >= 0 ? `<span class="rk">#${k + 1}</span>` : ''}
+      <span class="lbl">Team</span><span class="no">${t + 1}</span><span class="nm">${esc(c.teams[t] || '')}</span></button>`;
+  });
+  h += `</div>
+    <div class="order"><span class="muted">Order:</span> ${S.picks.length ? S.picks.map((t, i) => `<span class="chip on">${i + 1}. T${t + 1}</span>`).join('') : '<span class="muted">nothing ranked yet</span>'}</div>
+    <div class="btns">
+      <button type="button" class="btn" id="btnClear" ${S.picks.length ? '' : 'disabled'}>Clear</button>
+      <button type="button" class="btn primary" id="btnSubmit" ${complete && !same ? '' : 'disabled'}>${existing ? 'Update ranking' : 'Submit ranking'}</button>
+    </div>
+    ${complete || existing ? '' : `<div class="muted" style="font-size:13px">Rank all ${teams.length} teams to submit.</div>`}
+  </div>`;
+  $('#judgeBody').innerHTML = h;
+}
+
+/* ---------- events ---------- */
+$('#codeForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const code = normalizeCode($('#codeInput').value);
+  if (code.length !== 8) { $('#codeErr').textContent = 'Codes are 8 letters and numbers, like ABCD-EFGH.'; return; }
+  $('#codeBtn').disabled = true;
+  $('#codeErr').textContent = '';
+  try {
+    if (!(await signIn(code))) $('#codeErr').textContent = `No judge has the code ${prettyCode(code)}. Check it with the organizer.`;
+  } catch (err) {
+    $('#codeErr').textContent = errMsg(err);
+  }
+  $('#codeBtn').disabled = false;
+});
+
+$('#switchBtn').addEventListener('click', () => signOutJudge(''));
+
+$('#judgeRounds').addEventListener('click', e => {
+  const b = e.target.closest('[data-r]');
+  if (!b || b.disabled) return;
+  S.viewRound = +b.dataset.r;
+  S.picks = null;
+  render();
+});
+
+$('#judgeBody').addEventListener('click', async e => {
+  const t = e.target.closest('[data-t]');
+  if (t) {
+    const id = +t.dataset.t, k = S.picks.indexOf(id);
+    if (k >= 0) S.picks.splice(k, 1); else S.picks.push(id);
+    render();
+    return;
+  }
+  if (e.target.closest('#btnClear')) { S.picks = []; render(); return; }
+  const btn = e.target.closest('#btnSubmit');
+  if (btn) {
+    btn.disabled = true;
+    const r = S.viewRound;
+    try {
+      await setDoc(doc(db, 'scores', scoreId(S.code, r)), {
+        scheduleId: S.cfg.scheduleId, judge: S.me.judge, round: r,
+        ranking: S.picks.slice(), at: new Date().toISOString(),
+      });
+      S.picks = null;
+      toast(`Round ${r + 1} ranking saved`);
+      render();
+    } catch (err) {
+      toast(errMsg(err));
+      btn.disabled = false;
     }
   }
-  return { lists, rep };
-}
+});
 
-export function generate(n, j, x, y) {
-  const slots = j * y;
-  const counts = new Array(n).fill(0);
-  const pair = range(j).map(() => new Array(n).fill(0));
-  const schedule = []; // schedule[round][judge] = [team indexes]
-  let repeats = 0, minC = Infinity, maxC = 0;
-
-  for (let r = 0; r < x; r++) {
-    const order = shuffle(range(n)).sort((a, b) => counts[a] - counts[b]);
-    const base = Math.floor(slots / n), extra = slots % n;
-    const mult = new Array(n).fill(base);
-    for (let i = 0; i < extra; i++) mult[order[i]]++;
-    mult.forEach(m => { minC = Math.min(minC, m); maxC = Math.max(maxC, m); });
-
-    let best = null, bestRep = Infinity;
-    for (let a = 0; a < 500 && bestRep > 0; a++) {
-      const res = tryAssign(n, j, y, mult, pair);
-      if (res && res.rep < bestRep) { best = res; bestRep = res.rep; }
-    }
-    if (!best) return { error: `Couldn't fit round ${r + 1}. Try fewer teams per judge.` };
-    repeats += best.rep;
-    best.lists.forEach((l, ji) => l.forEach(t => { pair[ji][t]++; counts[t]++; }));
-    schedule.push(best.lists.map(l => l.sort((a, b) => a - b)));
+/* ---------- start ---------- */
+(async function boot() {
+  if (!configured) {
+    show('gate');
+    $('#codeErr').textContent = 'Firebase isn\'t set up yet. Add your project config to js/firebase-config.js.';
+    $('#codeBtn').disabled = true;
+    return;
   }
-  return { schedule, counts, repeats, minC, maxC };
-}
-
-export function validateSetup(f) {
-  if (!Number.isFinite(f.n) || f.n < 2) return 'Enter at least 2 teams.';
-  if (f.n > 500) return 'Up to 500 teams are supported.';
-  if (!f.judges.length) return 'Add at least one judge.';
-  if (new Set(f.judges).size !== f.judges.length) return 'Each judge needs a different name.';
-  if (!Number.isFinite(f.x) || f.x < 1) return 'Enter at least 1 round.';
-  if (f.x > 30) return 'Up to 30 rounds are supported.';
-  if (!Number.isFinite(f.y) || f.y < 1) return 'Each judge needs at least 1 team per round.';
-  if (f.y > f.n) return `A judge can't see more teams (${f.y}) than there are (${f.n}).`;
-  return null;
-}
-
-/* Firestore can't store arrays inside arrays, so the schedule is saved as a
-   map keyed "round_judge" -> [team indexes]. */
-export const aKey = (r, ji) => `${r}_${ji}`;
-
-export function toAssignments(schedule) {
-  const out = {};
-  schedule.forEach((rd, r) => rd.forEach((teams, ji) => { out[aKey(r, ji)] = teams; }));
-  return out;
-}
-
-export function teamsFor(cfg, r, ji) {
-  return cfg.assignments[aKey(r, ji)] || [];
-}
-
-/* ---------- access codes ---------- */
-const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L
-export function makeCode() {
-  const buf = new Uint32Array(8);
-  crypto.getRandomValues(buf);
-  return [...buf].map(v => ALPHA[v % ALPHA.length]).join('');
-}
-export const normalizeCode = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-export const prettyCode = c => c.slice(0, 4) + '-' + c.slice(4);
-export const scoreId = (code, r) => `${code}_r${r}`;
-
-/* ---------- scoring ----------
-   Rank 1 = 1 point, rank 2 = 2 points, ... Lowest total wins.
-   If teams have been judged a different number of times, rank by average
-   instead so nobody is penalized for extra judgings. */
-
-export function isValidScore(cfg, s) {
-  if (!s || !cfg || s.scheduleId !== cfg.scheduleId) return false;
-  const want = teamsFor(cfg, s.round, s.judge);
-  if (!Array.isArray(s.ranking) || s.ranking.length !== want.length || !want.length) return false;
-  const set = new Set(want);
-  return s.ranking.every(t => set.has(t)) && new Set(s.ranking).size === want.length;
-}
-
-export function computeResults(cfg, scores) {
-  const n = cfg.teams.length;
-  const pts = new Array(n).fill(0), got = new Array(n).fill(0), expected = new Array(n).fill(0);
-  Object.values(cfg.assignments).forEach(l => l.forEach(t => expected[t]++));
-
-  const valid = scores.filter(s => isValidScore(cfg, s));
-  valid.forEach(s => s.ranking.forEach((t, i) => { pts[t] += i + 1; got[t]++; }));
-
-  const byTotal = got.every(g => g > 0 && g === got[0]);
-  const rows = range(n).map(t => ({
-    t, pts: pts[t], got: got[t], expected: expected[t],
-    metric: got[t] ? (byTotal ? pts[t] : pts[t] / got[t]) : Infinity,
-  }));
-  rows.sort((a, b) => a.metric - b.metric || a.t - b.t);
-  // Competition ranking: tied teams share a place, so a tie for 1st can push
-  // the next team to 3rd. Every team with place <= 3 is shown in the top 3.
-  rows.forEach(r => { r.place = r.got ? 1 + rows.filter(o => o.metric < r.metric - 1e-9).length : null; });
-
-  const total = cfg.judges.length * cfg.rounds;
-  return { rows, byTotal, submitted: valid.length, total };
-}
+  const saved = normalizeCode(ls.get('judgeCode'));
+  if (saved) {
+    try { if (await signIn(saved)) return; } catch (e) {}
+    signOutJudge('Your saved code no longer works. Enter your current code.');
+    return;
+  }
+  show('gate');
+})();

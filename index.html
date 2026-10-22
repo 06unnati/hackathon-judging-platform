@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hackathon Judging</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow" id="hdrSub">Judge portal</div>
+      <h1 id="hdrName">Hackathon Judging</h1>
+    </div>
+    <div class="status">
+      <span class="pill" id="roundPill" hidden></span>
+      <span class="pill" id="whoPill" hidden></span>
+    </div>
+  </header>
+
+  <!-- Code entry -->
+  <section id="gate" class="gate" hidden>
+    <form class="card" id="codeForm" novalidate>
+      <h2>Enter your judge code</h2>
+      <p class="muted" style="margin:0">The organizer gave each judge an 8-character code. It links this device to your name.</p>
+      <label class="field" for="codeInput">Judge code
+        <input type="text" id="codeInput" class="codeinput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH" maxlength="12">
+      </label>
+      <div class="err" id="codeErr"></div>
+      <button type="submit" class="btn primary" id="codeBtn">Start judging</button>
+    </form>
+  </section>
+
+  <!-- Judging -->
+  <section id="judge" class="panel" hidden>
+    <div class="card">
+      <div class="judgebar">
+        <div class="field" style="display:flex;flex-direction:column;gap:6px;flex:1 1 220px">
+          <span style="font-weight:600;font-size:14px">Round</span>
+          <div class="rounds" id="judgeRounds"></div>
+        </div>
+        <button type="button" class="linkbtn" id="switchBtn">Not you? Use a different code</button>
+      </div>
+    </div>
+    <div id="judgeBody" class="panel"></div>
+  </section>
+
+  <p class="muted" id="loading">Loading…</p>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="js/judge.js"></script>
+</body>
+</html>

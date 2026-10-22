@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hackathon Judging · Admin</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=JetBrains+Mono:wght@500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow" id="hdrSub">Admin</div>
+      <h1 id="hdrName">Hackathon Judging</h1>
+    </div>
+    <div class="status">
+      <span class="pill" id="roundPill" hidden></span>
+      <span class="pill live" id="adminPill" hidden><span class="dot"></span><span id="adminEmail"></span></span>
+      <button type="button" class="linkbtn" id="logoutBtn" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <!-- Login -->
+  <section id="gate" class="gate" hidden>
+    <form class="card" id="loginForm" novalidate>
+      <h2>Admin sign-in</h2>
+      <label class="field" for="email">Email
+        <input type="text" id="email" autocomplete="username" inputmode="email">
+      </label>
+      <label class="field" for="password">Password
+        <input type="password" id="password" autocomplete="current-password">
+      </label>
+      <div class="err" id="loginErr"></div>
+      <button type="submit" class="btn primary" id="loginBtn">Sign in</button>
+      <p class="muted" style="margin:0;font-size:13px">Judges don't sign in here. They use the <a href="./">judge page</a> with their code.</p>
+    </form>
+  </section>
+
+  <!-- Dashboard -->
+  <div id="app" class="panel" hidden>
+    <nav role="tablist" id="tabs">
+      <button role="tab" data-tab="setup" id="tab-setup">Setup</button>
+      <button role="tab" data-tab="board" id="tab-board">Scoreboard</button>
+      <button role="tab" data-tab="codes" id="tab-codes">Judge codes</button>
+    </nav>
+
+    <section class="panel" id="panel-setup" hidden>
+      <div class="grid2">
+        <form class="card" id="setupForm" novalidate>
+          <h2>Event setup</h2>
+          <label class="field" for="fEvent">Hackathon name
+            <input type="text" id="fEvent" value="Spring Hackathon">
+          </label>
+          <div class="row">
+            <label class="field" for="fTeams">Teams <small>n</small>
+              <input type="number" id="fTeams" min="2" max="500" value="12">
+            </label>
+            <label class="field" for="fRounds">Rounds <small>x</small>
+              <input type="number" id="fRounds" min="1" max="30" value="3">
+            </label>
+          </div>
+          <label class="field" for="fPer">Teams each judge sees per round <small>y — the notes show the range that keeps 1–2 judges per team</small>
+            <input type="number" id="fPer" min="1" max="100" value="4">
+          </label>
+          <label class="field" for="fJudges">Judges <small>One name per line. The count sets j.</small>
+            <textarea id="fJudges">Judge 1
+Judge 2
+Judge 3
+Judge 4
+Judge 5
+Judge 6</textarea>
+          </label>
+          <label class="field" for="fNames">Team names <small>Optional, one per line in team-number order.</small>
+            <textarea id="fNames" placeholder="Team 1 name&#10;Team 2 name"></textarea>
+          </label>
+          <div class="btns">
+            <button type="button" class="btn" id="btnShuffle">Reshuffle</button>
+            <button type="submit" class="btn primary" id="btnSave">Publish schedule</button>
+          </div>
+          <div id="saveMsg" class="muted" style="font-size:13px"></div>
+        </form>
+
+        <div class="panel" style="min-width:0">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline">
+              <h2>Schedule preview</h2>
+              <span class="muted" style="font-size:13px" id="previewSub"></span>
+            </div>
+            <div class="stats" id="stats"></div>
+            <div class="notes" id="notes"></div>
+          </div>
+          <div class="card">
+            <h3>Who judges which teams</h3>
+            <div class="tablewrap" id="schedTable"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-board" hidden></section>
+    <section class="panel" id="panel-codes" hidden></section>
+  </div>
+
+  <p class="muted" id="loading">Loading…</p>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>

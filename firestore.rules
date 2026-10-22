@@ -1,0 +1,58 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function cfg() {
+      return get(/databases/$(database)/documents/config/main).data;
+    }
+
+    match /admins/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, write: if false;
+    }
+
+    match /config/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Judges can look up a code only if they already know it (get, not list).
+    match /judgeCodes/{code} {
+      allow get: if true;
+      allow list, write: if isAdmin();
+    }
+
+    match /scores/{sid} {
+      // Reading one score needs its id, which contains the judge's code.
+      allow get: if true;
+      allow list, delete: if isAdmin();
+      allow create, update: if isAdmin() || validJudgeWrite(sid);
+    }
+
+    function validJudgeWrite(sid) {
+      let code = sid.split('_')[0];
+      let jcPath = /databases/$(database)/documents/judgeCodes/$(code);
+      let d = request.resource.data;
+      let c = cfg();
+      let key = string(d.round) + '_' + string(d.judge);
+      return exists(jcPath)
+        && d.keys().hasOnly(['scheduleId', 'judge', 'round', 'ranking', 'at'])
+        && d.round is int && d.judge is int
+        && sid == code + '_r' + string(d.round)
+        && get(jcPath).data.judge == d.judge
+        && get(jcPath).data.scheduleId == c.scheduleId
+        && d.scheduleId == c.scheduleId
+        && d.round >= 0 && d.round <= c.currentRound
+        && key in c.assignments
+        && d.ranking is list
+        && d.ranking.size() == c.assignments[key].size()
+        && d.ranking.toSet() == c.assignments[key].toSet();
+    }
+  }
+}

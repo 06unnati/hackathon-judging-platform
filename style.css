@@ -118,3 +118,5 @@ td.current,th.current{background:var(--accent-soft)}
 .linkbtn{background:none;border:0;color:var(--accent);cursor:pointer;padding:0;font-weight:600;text-decoration:underline}
 .codes td.code{font-family:var(--mono);font-weight:700;letter-spacing:.06em}
 a{color:var(--accent)}
+
+[hidden]{display:none!important}

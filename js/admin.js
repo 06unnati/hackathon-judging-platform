@@ -161,16 +161,17 @@ function renderSetup() {
   }
   const btn = $('#btnSave');
   btn.disabled = !d || !!d.error;
-  btn.textContent = S.confirmReset ? 'Replace live schedule and clear rankings' : 'Publish schedule';
-  btn.className = 'btn ' + (S.confirmReset ? 'danger' : 'primary');
+  btn.textContent = 'Publish schedule';
+  btn.className = 'btn primary';
+  btn.hidden = S.confirmReset;
 }
 
 let deb;
 $('#setupForm').addEventListener('input', () => {
   clearTimeout(deb);
-  deb = setTimeout(() => { S.confirmReset = false; $('#saveMsg').textContent = ''; buildDraft(); render(); }, 200);
+  deb = setTimeout(() => { clearConfirm(); buildDraft(); render(); }, 200);
 });
-$('#btnShuffle').addEventListener('click', () => { S.confirmReset = false; $('#saveMsg').textContent = ''; buildDraft(); render(); });
+$('#btnShuffle').addEventListener('click', () => { clearConfirm(); buildDraft(); render(); });
 
 $('#setupForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -179,13 +180,21 @@ $('#setupForm').addEventListener('submit', async e => {
   if (S.cfg && !S.confirmReset) {
     const n = validScores().length;
     S.confirmReset = true;
-    $('#saveMsg').textContent = n
-      ? `${n} submitted ranking${n > 1 ? 's' : ''} will be cleared and every judge gets a new code. Click again to confirm.`
-      : 'This replaces the live schedule and gives every judge a new code. Click again to confirm.';
+    const msg = $('#saveMsg');
+    msg.className = 'note';
+    msg.style.fontSize = '14px';
+    msg.innerHTML = `<b>Replace the live schedule?</b><br>${n
+      ? `${n} submitted ranking${n > 1 ? 's' : ''} will be deleted and every judge gets a new code.`
+      : 'Every judge gets a new code and the old codes stop working.'}
+      <div class="btns" style="margin-top:10px">
+        <button type="submit" class="btn danger">Yes, replace it</button>
+        <button type="button" class="btn" id="btnCancelReset">Cancel</button>
+      </div>`;
+    msg.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     render();
     return;
   }
-  S.confirmReset = false;
+  clearConfirm();
   $('#btnSave').disabled = true;
   const f = d.form;
   const scheduleId = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -201,15 +210,28 @@ $('#setupForm').addEventListener('submit', async e => {
     batch.set(doc(db, 'config', 'main'), cfg);
     codes.forEach((code, ji) => batch.set(doc(db, 'judgeCodes', code), { judge: ji, name: f.judges[ji], scheduleId }));
     await batch.commit();
-    $('#saveMsg').textContent = '';
+    clearConfirm();
     toast('Schedule published. Hand out the new judge codes.');
     S.tab = 'codes';
     render();
     await cleanup(scheduleId);
   } catch (err) {
     $('#saveMsg').textContent = errMsg(err);
+    toast(`Not published: ${errMsg(err)}`);
     render();
   }
+});
+
+function clearConfirm() {
+  S.confirmReset = false;
+  const msg = $('#saveMsg');
+  msg.className = 'muted';
+  msg.style.fontSize = '13px';
+  msg.textContent = '';
+}
+
+$('#saveMsg').addEventListener('click', e => {
+  if (e.target.closest('#btnCancelReset')) { clearConfirm(); render(); }
 });
 
 // Remove judge codes and rankings that belong to an older schedule.
@@ -366,8 +388,7 @@ $('#tabs').addEventListener('click', e => {
   const b = e.target.closest('[data-tab]');
   if (!b) return;
   S.tab = b.dataset.tab;
-  S.confirmReset = false;
-  $('#saveMsg').textContent = '';
+  clearConfirm();
   render();
 });
 

@@ -9,7 +9,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { firebaseConfig } from "./firebase-config.js";
 
-export const configured = !String(firebaseConfig.apiKey).startsWith("PASTE");
+// Make sure hidden sections stay hidden even if style.css is old or cached.
+const hideStyle = document.createElement("style");
+hideStyle.textContent = "[hidden]{display:none!important}";
+document.head.appendChild(hideStyle);
+
+export const configured =!String(firebaseConfig.apiKey).startsWith("PASTE");
 export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);

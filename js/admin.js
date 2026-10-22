@@ -379,9 +379,10 @@ function render() {
     $('#tab-' + t).setAttribute('aria-selected', String(tab === t));
     $('#panel-' + t).hidden = tab !== t;
   });
-  if (tab === 'setup') renderSetup();
-  if (tab === 'board') renderBoard();
-  if (tab === 'codes') renderCodes();
+  // Re-render every panel so none can show stale data.
+  renderSetup();
+  renderBoard();
+  renderCodes();
 }
 
 $('#tabs').addEventListener('click', e => {
